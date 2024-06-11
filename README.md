@@ -31,11 +31,17 @@ set them in your `docker-compose.yml`):
 
 ## Example docker-compose
 
+Callsigns.txt should contain a newline separated list of callsigns to look for.
+
 ```docker
 version: "3"
 services:
   myradicalbot:
     image: my_rad_bot:latest
+    volumes:
+      - type: bind
+        source: ./callsigns.txt
+        target: /app/callsigns.txt
     environment:
       TZ: America/New_York
       BOT_TOKEN: "bot token here" # the generated discord bot token
@@ -43,5 +49,6 @@ services:
       CHANNEL_ID: "channel id here"  # channel id to post in
       CALLSIGN_MGR_ROLE_ID: "role id here"  # id of role to add/remove callsigns
       PING_ROLE_ID: "role id here"  # id of role to ping in spot embeds
+      DISABLE_RBN: '0'
     restart: unless-stopped
 ```
