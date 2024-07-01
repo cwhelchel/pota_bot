@@ -11,6 +11,9 @@ import logging.handlers
 import time
 import urllib.parse
 import re
+from threading import Lock
+
+mutex_lock = Lock()
 
 POTA_SPOT_URL = "https://api.pota.app/spot/activator"
 ACTIVATOR_INFO_URL = "https://api.pota.app/stats/user/{call}"
@@ -141,7 +144,7 @@ def get_rbn_spots(calls: list[str]):
         # print(r)
         if r is not None:
             x += r
-        time.sleep(0.25)
+        time.sleep(0.01)
 
     return x
 
@@ -151,6 +154,8 @@ def query_rbn(call: str):
         arr = j['spots'][spot]
         t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
         timestamp = t.isoformat()
+        snr = arr[3]
+        wpm = arr[4]
         return {
             'activator': arr[2],
             'frequency': arr[1],
@@ -158,7 +163,7 @@ def query_rbn(call: str):
             'spotTime': timestamp,
             'comments': '##RBN##',  # hijack comment field for flag
             'reference': f'de {arr[0]}',
-            'name': '',
+            'name': f'{snr} db • {wpm} wpm',
             'locationDesc': ''
         }
 
@@ -296,7 +301,7 @@ def build_rbn_embed(spot: any) -> str:
     def get_description(call, timestamp):
         rbn_url = f"https://www.reversebeacon.net/main.php?spotted_call={call}"
         qrz_url = f"https://www.qrz.com/db/{call}"
-        return f"{timestamp} • [rbn]({rbn_url}) • [qrz]({qrz_url})"
+        return f"{timestamp} • [rbn]({rbn_url}) • [qrz]({qrz_url})\n"
 
     act = spot['activator']
     freq = spot['frequency']
@@ -307,7 +312,8 @@ def build_rbn_embed(spot: any) -> str:
     rbn_msg["embeds"][0]['description'] = get_description(act, timestamp)
 
     # reference is 'spotted by X' for RBN
-    rbn_msg["embeds"][0]['fields'][1]['value'] = spot['reference']
+    spotby = spot['reference'] + ' • ' + spot['name']
+    rbn_msg["embeds"][0]['fields'][1]['value'] = spotby
 
     return rbn_msg
 
@@ -397,34 +403,35 @@ class MgraBot(discord.Client):
     async def on_ready(self):
         log.info(f'onready: Logged in as {self.user} (ID: {self.user.id})')
 
-    @tasks.loop(seconds=30)
+    @tasks.loop(seconds=60)
     async def my_background_task(self):
         channel = self.get_channel(channel_id)
 
-        calls = get_callsign_list()
-        spots = get_spots()
+        with mutex_lock:
+            calls = get_callsign_list()
+            spots = get_spots()
 
-        if not disable_rbn:
-            rbn_spots = get_rbn_spots(calls)
-            if rbn_spots:
-                spots = spots + rbn_spots
+            if not disable_rbn:
+                rbn_spots = get_rbn_spots(calls)
+                if rbn_spots:
+                    spots = spots + rbn_spots
 
-        for spot in spots:
-            act = spot['activator']
-            act = get_basecall(act)
+            for spot in spots:
+                act = spot['activator']
+                act = get_basecall(act)
 
-            if act in calls:
-                must_send = self.storage.check_spot(spot)
+                if act in calls:
+                    must_send = self.storage.check_spot(spot)
 
-                if must_send:
-                    msg = build_embed(spot)
-                    spot_type = 'POTA'
-                    if spot['comments'] == '##RBN##':
-                        spot_type = 'RBN'
-                    embed = discord.Embed.from_dict(msg['embeds'][0])
-                    await channel.send(
-                        content=f'<@&{ping_role}> {spot_type} SPOT',
-                        embed=embed)
+                    if must_send:
+                        msg = build_embed(spot)
+                        spot_type = 'POTA'
+                        if spot['comments'] == '##RBN##':
+                            spot_type = 'RBN'
+                        embed = discord.Embed.from_dict(msg['embeds'][0])
+                        await channel.send(
+                            content=f'<@&{ping_role}> {spot_type} SPOT',
+                            embed=embed)
 
     @my_background_task.before_loop
     async def before_my_task(self):
@@ -434,10 +441,14 @@ class MgraBot(discord.Client):
 
 mentions = discord.AllowedMentions(roles=True, users=True, everyone=False)
 
-
 client = MgraBot(
     intents=discord.Intents.default(),
     allowed_mentions=mentions)
+
+
+###
+# SHOW CALL COMMAND
+###
 
 
 @client.tree.command(
@@ -446,9 +457,21 @@ client = MgraBot(
     guild=discord.Object(id=guild_id)
 )
 async def show_calls_cmd(interaction):
+    if mutex_lock.locked():
+        return
     t = get_callsign_list()
     msg = ",".join(t)
     await interaction.response.send_message(f"### Configured callsigns \n{msg}", ephemeral=True)
+
+
+@show_calls_cmd.error
+async def show_call_cmd_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# ADD CALL COMMAND
+###
 
 
 @client.tree.command(
@@ -460,6 +483,10 @@ async def show_calls_cmd(interaction):
 @app_commands.checks.has_role(callsign_role_id)
 async def add_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"adding callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
+
+    if mutex_lock.locked():
+        return
+
     add_callsign(callsign.upper())
     await interaction.response.send_message(f"### Callsign added\n {callsign}", ephemeral=True)
 
@@ -467,6 +494,11 @@ async def add_call_cmd(interaction: discord.Interaction, callsign: str):
 @add_call_cmd.error
 async def add_call_cmd_error(interaction: discord.Interaction, error):
     await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# REMOVE CALL COMMAND
+###
 
 
 @client.tree.command(
@@ -478,6 +510,8 @@ async def add_call_cmd_error(interaction: discord.Interaction, error):
 @app_commands.checks.has_role(callsign_role_id)
 async def remove_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"removing callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
+    if mutex_lock.locked():
+        return
     remove_callsign(callsign.upper())
     await interaction.response.send_message(f"### Callsign removed\n {callsign}", ephemeral=True)
 
