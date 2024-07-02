@@ -349,6 +349,12 @@ class Storage:
         new_time = datetime(new_time.year, new_time.month, new_time.day, new_time.hour,
                             new_time.minute, new_time.second, new_time.microsecond, timezone.utc)
 
+        # if for some reason this spot is super old we dont want to process it
+        # at all. assume it's in the list by mistake.
+        #   (RBN started ignoring max age for ex)
+        if (datetime.now(timezone.utc) - new_time) > timedelta(minutes=31):
+            return False
+
         for s in self.spots:
             act = s['spot']['activator']
             old_freq = s['spot']['frequency']
