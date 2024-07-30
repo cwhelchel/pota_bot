@@ -321,16 +321,15 @@ def build_rbn_embed(spot: any) -> str:
 
 class Storage:
     def __init__(self):
-        self.spots = []
         self.schedule = None
+        self.spots = {}
 
     def add_spot(self, spot: any):
-        x = {
+        self.spots[spot['activator']]  = {
             'timestamp': datetime.now(timezone.utc),
             'spot': spot,
             'qrt': False
         }
-        self.spots.append(x)
 
     def check_freq(self, a: float, b: float):
         try:
@@ -344,12 +343,9 @@ class Storage:
             return False
 
     def check_spot(self, spot: any):
-        new_act = spot['activator']
-        new_freq = spot['frequency']
-        new_mode = str(spot['mode'])
-        new_time = datetime.fromisoformat(spot['spotTime'])
-        new_time = datetime(new_time.year, new_time.month, new_time.day, new_time.hour,
-                            new_time.minute, new_time.second, new_time.microsecond, timezone.utc)
+        act = spot['activator']
+        cmt = str(spot['comments'])
+        new_time = datetime.fromisoformat(spot['spotTime']).replace(tzinfo=timezone.utc)
 
         # if for some reason this spot is super old we dont want to process it
         # at all. assume it's in the list by mistake.
@@ -357,39 +353,37 @@ class Storage:
         if (datetime.now(timezone.utc) - new_time) > timedelta(minutes=31):
             return False
 
-        for s in self.spots:
-            act = s['spot']['activator']
-            old_freq = s['spot']['frequency']
-            old_mode = s['spot']['mode']
-            if act == new_act:
-                freq_changed = self.check_freq(old_freq, new_freq)
+        old_spot = self.spots.get(act)
+        if old_spot is None:
+            if "qrt" not in cmt.lower():
+                self.add_spot(spot)
+                return True
+        else:
+            old_freq = old_spot['spot']['frequency']
+            old_mode = old_spot['spot']['mode']
+            new_freq = spot['frequency']
+            new_mode = str(spot['mode'])
 
-                if freq_changed and not new_mode.startswith('FT'):
-                    self.spots.remove(s)
-                    self.add_spot(spot)
-                    return True
-                if old_mode != new_mode:
-                    self.spots.remove(s)
-                    self.add_spot(spot)
-                    return True
+            freq_changed = self.check_freq(old_freq, new_freq)
 
-                cmt = str(spot['comments'])
-                if "qrt" in cmt.lower():
-                    if s['qrt']:
-                        # QRT msg has already been sent
-                        return False
-                    else:
-                        s['qrt'] = True
-                        return True
-                return False
+            if freq_changed and not new_mode.startswith('FT'):
+                self.add_spot(spot)
+                return True
+            elif old_mode != new_mode:
+                self.add_spot(spot)
+                return True
+            elif "qrt" in cmt.lower() and not old_spot['qrt']:
+                old_spot['qrt'] = True
+                return True
+        return False
 
-            # remove any old spots we have
-            now = datetime.now(timezone.utc)
-            if now - s['timestamp'] > timedelta(minutes=30):
-                self.spots.remove(s)
+    def expire(self):
+        # remove any old spots we have
+        now = datetime.now(timezone.utc)
+        for act in list(self.spots.keys()):
+            if now - self.spots[act]['timestamp'] > timedelta(minutes=30):
+                del self.spots[act]
 
-        self.add_spot(spot)
-        return True
 
     def get_schedule(self) -> any:
         try:
@@ -453,6 +447,7 @@ class MgraBot(discord.Client):
                         await channel.send(
                             content=f'<@&{ping_role}> {spot_type} SPOT',
                             embed=embed)
+            self.storage.expire()
 
     @my_background_task.before_loop
     async def before_my_task(self):
