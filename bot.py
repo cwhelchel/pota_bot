@@ -13,6 +13,7 @@ import time
 import urllib.parse
 import re
 from threading import Lock
+from cachetools.func import ttl_cache
 
 mutex_lock = Lock()
 
@@ -192,6 +193,7 @@ def query_rbn(call: str):
     return None
 
 
+@ttl_cache(ttl=6*60*60)  # 6hours
 def get_activator_stats(activator: str):
     '''Return all spot + comments from a given activation'''
     s = get_basecall(activator)
