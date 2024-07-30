@@ -259,7 +259,7 @@ def build_pota_embed(spot: any) -> str:
 
     def get_description(ref, call, timestamp):
         park_url = f"https://pota.app/#/park/{ref}"
-        act_url = f"https://pota.app/#/profile/{call}"
+        act_url = f"https://pota.app/#/profile/{get_basecall(call)}"
         qrz_url = f"https://www.qrz.com/db/{call}"
         return f"{timestamp} • [park]({park_url}) • [profile]({act_url}) • [qrz]({qrz_url})"
 
