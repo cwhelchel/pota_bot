@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 COPY callsigns.txt .
+COPY schedule.json .
 COPY bot.py .
 
 RUN pip install -r requirements.txt

@@ -1,6 +1,7 @@
 # noqa E501
 
 from datetime import datetime, timezone, timedelta
+import json
 import os
 import requests
 import discord
@@ -321,6 +322,7 @@ def build_rbn_embed(spot: any) -> str:
 class Storage:
     def __init__(self):
         self.spots = []
+        self.schedule = None
 
     def add_spot(self, spot: any):
         x = {
@@ -389,6 +391,18 @@ class Storage:
         self.add_spot(spot)
         return True
 
+    def get_schedule(self) -> any:
+        try:
+            with open(file="schedule.json", mode="r", encoding='utf8') as f:
+                lines = f.read()
+                self.schedule = json.loads(lines)
+        except Exception as ex:
+            print(f"Error getting schedule file: {ex}")
+            log.error("Error getting schedule file", exc_info=ex)
+            self.schedule = None
+
+        return self.schedule
+
 
 class MgraBot(discord.Client):
     '''
@@ -405,6 +419,7 @@ class MgraBot(discord.Client):
         log.info(f"synced {synced}")
         # start the task to run in the background
         self.my_background_task.start()
+        self.check_scheduled_msgs.start()
 
     async def on_ready(self):
         log.info(f'onready: Logged in as {self.user} (ID: {self.user.id})')
@@ -443,6 +458,58 @@ class MgraBot(discord.Client):
     async def before_my_task(self):
         # wait until the bot logs in
         await self.wait_until_ready()
+
+    @tasks.loop(seconds=60)
+    async def check_scheduled_msgs(self):
+        '''
+        This Background task executes every minute to check the time and see if
+        there are scheduled messages to send. If so send the configured message.
+        '''
+        now = datetime.now(timezone.utc)
+        weekday = now.date().weekday()
+        schedule = self.storage.get_schedule()
+
+        if schedule is None:
+            return
+
+        try:
+            for x in schedule:
+                if weekday == x['dow']:
+                    msg_time = x['time_utc'].split(':')
+                    if now.hour == int(msg_time[0]) and now.minute == int(msg_time[1]):
+                        await self._send_scheduled_msg(x)
+        except Exception as ex:
+            log.error("Error sending scheduled msg", exc_info=ex)
+            print(f"Error sending scheduled msg {ex}")
+
+    @check_scheduled_msgs.before_loop
+    async def before_check_scheduled_msgs(self):
+        # wait until the bot logs in
+        await self.wait_until_ready()
+
+    async def _send_scheduled_msg(self, json):
+        '''
+        Sends the configured schedule message.
+
+        Args:
+            json: The JSON of the msg. straight from schedule.json
+        '''
+        if json is None:
+            return
+
+        # msg field could be a list of strings or a string
+        msg_content = json['msg']
+        if type(msg_content) is list:
+            msg_content = "\n".join(msg_content)
+
+        raw_embeds = json['embeds']
+        embeds = []
+        for em_raw in raw_embeds:
+            embeds.append(discord.Embed.from_dict(em_raw))
+
+        channel_id = int(json['channel'])
+        channel = self.get_channel(channel_id)
+        await channel.send(content=msg_content, embeds=embeds)
 
 
 mentions = discord.AllowedMentions(roles=True, users=True, everyone=False)
