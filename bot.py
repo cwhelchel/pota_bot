@@ -344,6 +344,7 @@ class Storage:
 
     def check_spot(self, spot: any):
         act = spot['activator']
+        cmt = str(spot['comments'])
         new_time = datetime.fromisoformat(spot['spotTime']).replace(tzinfo=timezone.utc)
 
         # if for some reason this spot is super old we dont want to process it
@@ -354,14 +355,14 @@ class Storage:
 
         old_spot = self.spots.get(act)
         if old_spot is None:
-            self.add_spot(spot)
-            return True
+            if "qrt" not in cmt.lower():
+                self.add_spot(spot)
+                return True
         else:
             old_freq = old_spot['spot']['frequency']
             old_mode = old_spot['spot']['mode']
             new_freq = spot['frequency']
             new_mode = str(spot['mode'])
-            cmt = str(spot['comments'])
 
             freq_changed = self.check_freq(old_freq, new_freq)
 
@@ -371,15 +372,10 @@ class Storage:
             elif old_mode != new_mode:
                 self.add_spot(spot)
                 return True
-            elif "qrt" in cmt.lower():
-                if old_spot['qrt']:
-                    # QRT msg has already been sent
-                    return False
-                else:
-                    old_spot['qrt'] = True
-                    return True
-            else:
-                return False
+            elif "qrt" in cmt.lower() and not old_spot['qrt']:
+                old_spot['qrt'] = True
+                return True
+        return False
 
     def expire(self):
         # remove any old spots we have
