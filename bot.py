@@ -509,7 +509,7 @@ class MgraBot(discord.Client):
         await channel.send(content=msg_content, embeds=embeds)
 
 
-mentions = discord.AllowedMentions(roles=True, users=True, everyone=False)
+mentions = discord.AllowedMentions(roles=True, users=True, everyone=True)
 
 client = MgraBot(
     intents=discord.Intents.default(),
