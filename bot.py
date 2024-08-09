@@ -277,6 +277,31 @@ def build_pota_embed(spot: any) -> str:
     test_msg["embeds"][0]['description'] = get_description(reference, act, timestamp)
 
     act_info = get_activator_stats(act)
+    act_info_unknown = {
+    "callsign": "unknown",
+    "name": "unknown",
+    "qth": "unknown",
+    "gravatar": "",
+    "activator": {
+        "activations": ?,
+        "parks": ?,
+        "qsos": ?
+    },
+    "attempts": {
+        "activations": ?,
+        "parks": ?,
+        "qsos": ?
+    },
+    "hunter": {
+        "parks": ?,
+        "qsos": ?
+    },
+    "awards": ?,
+    "endorsements": ?
+}
+    if act_info is None: 
+        act_info = act_info_unknown
+
     actx = act_info['activator']['activations']
     qsos = act_info['activator']['qsos']
     name = act_info['name']
