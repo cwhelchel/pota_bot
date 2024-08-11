@@ -193,7 +193,7 @@ def query_rbn(call: str):
     return None
 
 
-@ttl_cache(ttl=6*60*60)  # 6hours
+@ttl_cache(ttl=6 * 60 * 60)  # 6hours
 def get_activator_stats(activator: str):
     '''Return all spot + comments from a given activation'''
     s = get_basecall(activator)
@@ -278,28 +278,28 @@ def build_pota_embed(spot: any) -> str:
 
     act_info = get_activator_stats(act)
     act_info_unknown = {
-    "callsign": "unknown",
-    "name": "unknown",
-    "qth": "unknown",
-    "gravatar": "",
-    "activator": {
-        "activations": ?,
-        "parks": ?,
-        "qsos": ?
-    },
-    "attempts": {
-        "activations": ?,
-        "parks": ?,
-        "qsos": ?
-    },
-    "hunter": {
-        "parks": ?,
-        "qsos": ?
-    },
-    "awards": ?,
-    "endorsements": ?
-}
-    if act_info is None: 
+        "callsign": "unknown",
+        "name": "unknown",
+        "qth": "unknown",
+        "gravatar": "",
+        "activator": {
+            "activations": '?',
+            "parks": '?',
+            "qsos": '?'
+        },
+        "attempts": {
+            "activations": '?',
+            "parks": '?',
+            "qsos": '?'
+        },
+        "hunter": {
+            "parks": '?',
+            "qsos": '?'
+        },
+        "awards": '?',
+        "endorsements": '?'
+    }
+    if act_info is None:
         act_info = act_info_unknown
 
     actx = act_info['activator']['activations']
@@ -352,7 +352,7 @@ class Storage:
         self.spots = {}
 
     def add_spot(self, spot: any):
-        self.spots[spot['activator']]  = {
+        self.spots[spot['activator']] = {
             'timestamp': datetime.now(timezone.utc),
             'spot': spot,
             'qrt': False
@@ -410,7 +410,6 @@ class Storage:
         for act in list(self.spots.keys()):
             if now - self.spots[act]['timestamp'] > timedelta(minutes=30):
                 del self.spots[act]
-
 
     def get_schedule(self) -> any:
         try:
