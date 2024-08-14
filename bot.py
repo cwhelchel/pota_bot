@@ -6,7 +6,6 @@ import logging
 import logging.handlers
 import os
 import re
-import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
@@ -147,6 +146,7 @@ async def get_rbn_spots(session, calls: list[str]):
 
     return await asyncio.gather(*x)
 
+
 def convert_rbn_to_pota_spot(j, spot):
     arr = j['spots'][spot]
     t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
@@ -163,6 +163,7 @@ def convert_rbn_to_pota_spot(j, spot):
         'name': f'{snr} db • {wpm} wpm',
         'locationDesc': ''
     }
+
 
 async def query_rbn(session, call: str):
 
