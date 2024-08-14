@@ -1,19 +1,21 @@
 # noqa E501
 
-from datetime import datetime, timezone, timedelta
+import asyncio
 import json
-import os
-import requests
-import discord
-from discord.ext import tasks
-from discord import app_commands
 import logging
 import logging.handlers
+import os
+import re
 import time
 import urllib.parse
-import re
+from datetime import datetime, timezone, timedelta
 from threading import Lock
-from cachetools.func import ttl_cache
+
+import aiohttp
+import discord
+from cache import AsyncTTL
+from discord.ext import tasks
+from discord import app_commands
 
 mutex_lock = Lock()
 
@@ -129,45 +131,41 @@ def validate_call(callsign: str) -> bool:
     return False
 
 
-def get_spots():
+async def get_spots(session):
     '''Return all current spots from POTA API'''
-    response = requests.get(POTA_SPOT_URL)
-    if response.status_code == 200:
-        j = response.json()
-        return j
+    async with session.get(POTA_SPOT_URL) as response:
+        if response.status == 200:
+            return await response.json()
+        else:
+            return []
 
 
-def get_rbn_spots(calls: list[str]):
+async def get_rbn_spots(session, calls: list[str]):
     '''Return RBN spots for each callsign in the given list'''
     x = []
     for call in calls:
-        y = urllib.parse.quote(call)
-        r = query_rbn(y)
-        # print(r)
-        if r is not None:
-            x += r
-        time.sleep(0.01)
+        x.append(query_rbn(session, call))
 
-    return x
+    return await asyncio.gather(*x)
 
+def convert_rbn_to_pota_spot(j, spot):
+    arr = j['spots'][spot]
+    t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
+    timestamp = t.isoformat()
+    snr = arr[3]
+    wpm = arr[4]
+    return {
+        'activator': arr[2],
+        'frequency': arr[1],
+        'mode': 'CW',         # URL only gets CW spots
+        'spotTime': timestamp,
+        'comments': '##RBN##',  # hijack comment field for flag
+        'reference': f'de {arr[0]}',
+        'name': f'{snr} db • {wpm} wpm',
+        'locationDesc': ''
+    }
 
-def query_rbn(call: str):
-    def convert_rbn_to_pota_spot(j, spot):
-        arr = j['spots'][spot]
-        t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
-        timestamp = t.isoformat()
-        snr = arr[3]
-        wpm = arr[4]
-        return {
-            'activator': arr[2],
-            'frequency': arr[1],
-            'mode': 'CW',         # URL only gets CW spots
-            'spotTime': timestamp,
-            'comments': '##RBN##',  # hijack comment field for flag
-            'reference': f'de {arr[0]}',
-            'name': f'{snr} db • {wpm} wpm',
-            'locationDesc': ''
-        }
+async def query_rbn(session, call: str):
 
     # h = returned as "ver_h": "4f6ae8" (version header maybe?)
     # ma = max age in seconds
@@ -176,35 +174,29 @@ def query_rbn(call: str):
     # s = 0 ???
     # r = max rows (100 is highest)
     # cdx = callsign to look for
+    call = urllib.parse.quote(call)
     url = f'https://www.reversebeacon.net/spots.php?h=4f6ae8&ma=60&m=1&bc=1&s=0&r=100&cdx={call}'
 
-    response = requests.get(url)
-    if response.status_code == 200:
-        j = response.json()
-        rbn_spots = []
+    async with session.get(url) as response:
+        if response.status == 200:
+            j = await response.json()
 
-        if 'spots' in j.keys():
-            for spot in j['spots']:
-                conv_spot = convert_rbn_to_pota_spot(j, spot)
-                rbn_spots.append(conv_spot)
-                break
-
-            return rbn_spots
-    return None
+            for spot in j.get('spots', []):
+                # Just return first match
+                return convert_rbn_to_pota_spot(j, spot)
 
 
-@ttl_cache(ttl=6 * 60 * 60)  # 6hours
-def get_activator_stats(activator: str):
+@AsyncTTL(time_to_live=6 * 60 * 60, skip_args=1)  # 6hours
+async def get_activator_stats(session, activator: str):
     '''Return all spot + comments from a given activation'''
     s = get_basecall(activator)
 
     url = ACTIVATOR_INFO_URL.format(call=s)
-    response = requests.get(url)
-    if response.status_code == 200:
-        j = response.json()
-        return j
-    else:
-        return None
+    async with session.get(url) as response:
+        if response.status == 200:
+            return await response.json()
+        else:
+            return None
 
 
 def get_callsign_list() -> list[str]:
@@ -236,14 +228,7 @@ def remove_callsign(callsign: str):
         f.write('\n'.join(calls))
 
 
-def build_embed(spot: any) -> str:
-    if spot['comments'] == '##RBN##':
-        return build_rbn_embed(spot)
-    else:
-        return build_pota_embed(spot)
-
-
-def build_pota_embed(spot: any) -> str:
+async def build_pota_embed(session, spot: any) -> str:
     '''
     The bulk of the work is done here to format spot data into a nice looking
     discord embed
@@ -276,7 +261,7 @@ def build_pota_embed(spot: any) -> str:
     test_msg["embeds"][0]['title'] = get_title(act, reference, mode, freq)
     test_msg["embeds"][0]['description'] = get_description(reference, act, timestamp)
 
-    act_info = get_activator_stats(act)
+    act_info = await get_activator_stats(session, act)
     act_info_unknown = {
         "callsign": "unknown",
         "name": "unknown",
@@ -450,14 +435,19 @@ class MgraBot(discord.Client):
 
         with mutex_lock:
             calls = get_callsign_list()
-            spots = get_spots()
 
+        async with aiohttp.ClientSession() as session:
+            pota_spots = get_spots(session)
             if not disable_rbn:
-                rbn_spots = get_rbn_spots(calls)
-                if rbn_spots:
-                    spots = spots + rbn_spots
+                rbn_spots = get_rbn_spots(session, calls)
+                both_spots = await asyncio.gather(pota_spots, rbn_spots)
+                spots = both_spots[0] + both_spots[1]
+            else:
+                spots = await pota_spots
 
             for spot in spots:
+                if spot is None:
+                    continue
                 act = spot['activator']
                 act = get_basecall(act)
 
@@ -465,15 +455,18 @@ class MgraBot(discord.Client):
                     must_send = self.storage.check_spot(spot)
 
                     if must_send:
-                        msg = build_embed(spot)
-                        spot_type = 'POTA'
                         if spot['comments'] == '##RBN##':
+                            msg = build_rbn_embed(spot)
                             spot_type = 'RBN'
+                        else:
+                            msg = await build_pota_embed(session, spot)
+                            spot_type = 'POTA'
+
                         embed = discord.Embed.from_dict(msg['embeds'][0])
                         await channel.send(
                             content=f'<@&{ping_role}> {spot_type} SPOT',
                             embed=embed)
-            self.storage.expire()
+        self.storage.expire()
 
     @my_background_task.before_loop
     async def before_my_task(self):
