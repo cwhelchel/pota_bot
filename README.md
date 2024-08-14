@@ -1,28 +1,50 @@
 # POTA BOT
 
-A Parks on the air Discord spot bot. Use it to post post spots from the main
-POTA site into your Discord server.
+A Parks on the air Discord spot bot. Use it to post spots from the main
+POTA site and/or the Reverse Beacon Network into your Discord server.
+
 
 ## Docker Setup
 
 This bot can be run from a docker image built and stored on docker hub at 
 [krinkl3/spotbot](https://hub.docker.com/repository/docker/krinkl3/spotbot/general)
 
-To run on low power ARM devices pull `krinkl3/spotbot:latest` or `krinkl3/spotbot:1.1`
+To run on low power ARM devices pull `krinkl3/spotbot:latest` or `krinkl3/spotbot:<version>`
 
-For other architectures pull `krinkl3/spotbot:<version>-amd64`.
+For other architectures pull `krinkl3/spotbot:<version>-amd64` or `krinkl3/spotbot:latest-amd64`.
 
 See the example docker-compose file below for a good starting point.
 
 ### Config Files
+
+There are two config files are used by the bot. The docker-compose example below uses
+two volume binds to expose them when you run the container. If you make changes 
+to the files while the bot is running, you do **_not_** have to restart the bot.
 
 `callsigns.txt` is the main configuration file. It should contain a newline 
 separated list of callsigns.
 
 `schedule.json` is a secondary configuration file with a specific format. See the
 example given in the source and modify to your needs. 
-Note the times are in UTC so adjust days of week according to the day of week at UTC zone. The days of week value is Python numbered, so 0 == Monday ... 6 == Sunday.
-<span style="vertical-align:super;font-size:0.8rem">👉 Consider this feature half-baked. I wouldn't put much trust in it.</span>
+Note the times are in UTC so adjust days of week according to the day of week at UTC zone. 
+
+The days of week value is Python numbered as follows:
+* 0 == Monday 
+* 1 == Tuesday
+* 2 == Wednesday
+* 3 == Thursday
+* 4 == Friday
+* 5 == Saturday
+* 6 == Sunday
+
+> ⚠ Be aware of the fact that times are in UTC and the day of week value may need 
+> to be on the _next_ UTC day depending on when the message needs to be sent.
+
+
+An example schedule is provided in `example-schedule.json`
+
+<span style="vertical-align:super;font-size:0.8rem">👉 This feature is in development. So far it's working to send single messages on given day of the week at a given time.</span>
+
 
 ### Example docker-compose
 

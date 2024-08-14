@@ -1,24 +1,24 @@
 [
     {
         "name": "Example_Msg",
-        "dow": 1,
-        "time_utc": "14:18",
+        "dow": 3,
+        "time_utc": "00:31",
         "msg": [
-            "🍑 **Reminder!** SE Linked Repeater Net _(Wednesday @ 900pm)_"
+            "🍑 **Reminder!** Linked Repeater Net _(Wednesday @ 900pm)_"
         ],
         "embeds": [
             {
-                "title": "Southeastern Linked Repeater NET",
-                "description": "On Peach State Intertie.\n**Note:** Some repeaters are linked on an as-needed basis.",
+                "title": "Example message",
+                "description": "This example message will be sent Thur UTC 0031 (Wed 8:31 pm EST)",
                 "fields": [
                     {
-                        "name": "Time",
+                        "name": "Time Net occurs",
                         "value": "Wednesday : 0100 UTC or 09:00pm local",
                         "inline": false
                     },
                     {
                         "name": "Reapter Info",
-                        "value": "WX4PCH: _146.850-_  `PL tone: 82.5`\nWM4B: _146.670-/443.150+_  `PL tone: 82.5`",
+                        "value": "RepaterCall: _146.850-_  `PL tone: 82.5`\nOTHER: _146.670-/443.150+_  `PL tone: 82.5`",
                         "inline": false
                     }
                 ]
