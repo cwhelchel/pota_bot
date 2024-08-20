@@ -6,10 +6,8 @@ import logging
 import logging.handlers
 import os
 import re
-import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
-from threading import Lock
 
 import aiohttp
 import discord
@@ -17,7 +15,7 @@ from cache import AsyncTTL
 from discord.ext import tasks
 from discord import app_commands
 
-mutex_lock = Lock()
+mutex_lock = asyncio.Lock()
 
 POTA_SPOT_URL = "https://api.pota.app/spot/activator"
 ACTIVATOR_INFO_URL = "https://api.pota.app/stats/user/{call}"
@@ -148,6 +146,7 @@ async def get_rbn_spots(session, calls: list[str]):
 
     return await asyncio.gather(*x)
 
+
 def convert_rbn_to_pota_spot(j, spot):
     arr = j['spots'][spot]
     t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
@@ -164,6 +163,7 @@ def convert_rbn_to_pota_spot(j, spot):
         'name': f'{snr} db • {wpm} wpm',
         'locationDesc': ''
     }
+
 
 async def query_rbn(session, call: str):
 
@@ -199,33 +199,40 @@ async def get_activator_stats(session, activator: str):
             return None
 
 
-def get_callsign_list() -> list[str]:
+async def get_callsign_list() -> list[str]:
+    async with mutex_lock:
+        return _get_callsign_list()
+
+
+def _get_callsign_list() -> list[str]:
     with open(file="callsigns.txt", mode="r") as f:
         lines = f.readlines()
 
     return [s.strip() for s in lines]
 
 
-def add_callsign(callsign: str):
-    calls = get_callsign_list()
-    if callsign in calls:
-        return
-    if not validate_call(callsign):
-        log.error("callsign is not valid")
-        raise ValueError("callsign is not valid")
+async def add_callsign(callsign: str):
+    async with mutex_lock:
+        calls = _get_callsign_list()
+        if callsign in calls:
+            return
+        if not validate_call(callsign):
+            log.error("callsign is not valid")
+            raise ValueError("callsign is not valid")
 
-    calls.append(callsign)
-    with open(file="callsigns.txt", mode="w") as f:
-        f.write('\n'.join(calls))
+        calls.append(callsign)
+        with open(file="callsigns.txt", mode="w") as f:
+            f.write('\n'.join(calls))
 
 
-def remove_callsign(callsign: str):
-    calls = get_callsign_list()
-    if callsign not in calls:
-        return
-    calls.remove(callsign)
-    with open(file="callsigns.txt", mode="w") as f:
-        f.write('\n'.join(calls))
+async def remove_callsign(callsign: str):
+    async with mutex_lock:
+        calls = _get_callsign_list()
+        if callsign not in calls:
+            return
+        calls.remove(callsign)
+        with open(file="callsigns.txt", mode="w") as f:
+            f.write('\n'.join(calls))
 
 
 async def build_pota_embed(session, spot: any) -> str:
@@ -432,9 +439,7 @@ class MgraBot(discord.Client):
     @tasks.loop(seconds=60)
     async def my_background_task(self):
         channel = self.get_channel(channel_id)
-
-        with mutex_lock:
-            calls = get_callsign_list()
+        calls = await get_callsign_list()
 
         async with aiohttp.ClientSession() as session:
             pota_spots = get_spots(session)
@@ -544,9 +549,7 @@ client = MgraBot(
     guild=discord.Object(id=guild_id)
 )
 async def show_calls_cmd(interaction):
-    if mutex_lock.locked():
-        return
-    t = get_callsign_list()
+    t = await get_callsign_list()
     msg = ",".join(t)
     await interaction.response.send_message(f"### Configured callsigns \n{msg}", ephemeral=True)
 
@@ -570,11 +573,7 @@ async def show_call_cmd_error(interaction: discord.Interaction, error):
 @app_commands.checks.has_role(callsign_role_id)
 async def add_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"adding callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
-
-    if mutex_lock.locked():
-        return
-
-    add_callsign(callsign.upper())
+    await add_callsign(callsign.upper())
     await interaction.response.send_message(f"### Callsign added\n {callsign}", ephemeral=True)
 
 
@@ -597,9 +596,7 @@ async def add_call_cmd_error(interaction: discord.Interaction, error):
 @app_commands.checks.has_role(callsign_role_id)
 async def remove_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"removing callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
-    if mutex_lock.locked():
-        return
-    remove_callsign(callsign.upper())
+    await remove_callsign(callsign.upper())
     await interaction.response.send_message(f"### Callsign removed\n {callsign}", ephemeral=True)
 
 
