@@ -1,12 +1,12 @@
 # noqa E501
 
 import asyncio
+import calendar
 import json
 import logging
 import logging.handlers
 import os
 import re
-import time
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from threading import Lock
@@ -16,6 +16,8 @@ import discord
 from cache import AsyncTTL
 from discord.ext import tasks
 from discord import app_commands
+
+from schedule import Schedule
 
 mutex_lock = Lock()
 
@@ -36,6 +38,7 @@ handler = logging.handlers.RotatingFileHandler(
     maxBytes=32 * 1024 * 1024,  # 32 MiB
     backupCount=5,  # Rotate through 5 files
 )
+
 log = logging.getLogger("discord")
 
 test_msg = {
@@ -148,6 +151,7 @@ async def get_rbn_spots(session, calls: list[str]):
 
     return await asyncio.gather(*x)
 
+
 def convert_rbn_to_pota_spot(j, spot):
     arr = j['spots'][spot]
     t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
@@ -164,6 +168,7 @@ def convert_rbn_to_pota_spot(j, spot):
         'name': f'{snr} db • {wpm} wpm',
         'locationDesc': ''
     }
+
 
 async def query_rbn(session, call: str):
 
@@ -479,19 +484,15 @@ class MgraBot(discord.Client):
         This Background task executes every minute to check the time and see if
         there are scheduled messages to send. If so send the configured message.
         '''
-        now = datetime.now(timezone.utc)
-        weekday = now.date().weekday()
-        schedule = self.storage.get_schedule()
+        schedule = Schedule.get_schedule()
 
         if schedule is None:
             return
-
         try:
-            for x in schedule:
-                if weekday == x['dow']:
-                    msg_time = x['time_utc'].split(':')
-                    if now.hour == int(msg_time[0]) and now.minute == int(msg_time[1]):
-                        await self._send_scheduled_msg(x)
+            for x in schedule.messages:
+                if schedule.time_to_send_msg(x):
+                    await self._send_scheduled_msg(x)
+
         except Exception as ex:
             log.error("Error sending scheduled msg", exc_info=ex)
             print(f"Error sending scheduled msg {ex}")
@@ -508,18 +509,7 @@ class MgraBot(discord.Client):
         Args:
             json: The JSON of the msg. straight from schedule.json
         '''
-        if json is None:
-            return
-
-        # msg field could be a list of strings or a string
-        msg_content = json['msg']
-        if type(msg_content) is list:
-            msg_content = "\n".join(msg_content)
-
-        raw_embeds = json['embeds']
-        embeds = []
-        for em_raw in raw_embeds:
-            embeds.append(discord.Embed.from_dict(em_raw))
+        msg_content, embeds = Schedule.get_scheduled_msg(json)
 
         channel_id = int(json['channel'])
         channel = self.get_channel(channel_id)
@@ -608,4 +598,118 @@ async def remove_call_cmd_error(interaction: discord.Interaction, error):
     await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
 
 
-client.run(token, log_handler=handler)
+###
+# SHOW SCHEDULED MSGS
+###
+
+
+@client.tree.command(
+    name="showmsgs",
+    description="Show a list scheduled messages",
+    guild=discord.Object(id=guild_id)
+)
+async def show_msgs_cmd(interaction):
+    sched = Schedule.get_schedule()
+
+    msg = ""
+    if sched:
+        for x in sched.messages:
+            msg += "----------\n"
+            msg += f"scheduled msg `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC - with message: `{x['msg']}`\n"
+
+    await interaction.response.send_message(f"### Configured msgs \n{msg}", ephemeral=True)
+
+
+@show_msgs_cmd.error
+async def show_msgs_cmd_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# VIEW MSGS
+###
+
+
+@client.tree.command(
+    name="viewmsg",
+    description="Display an example of a configured named message",
+    guild=discord.Object(id=guild_id)
+)
+@app_commands.describe(msg_name='Name of the scheduled message to view.')
+async def view_msg_cmd(interaction, msg_name: str):
+    sched = Schedule.get_schedule()
+
+    msg_content = ""
+    embeds = []
+    if sched:
+        for msg in sched.messages:
+            if (msg['name'] == msg_name):
+                j = json.dumps(msg['embeds'], indent=4)
+                msg_embed = f"Embeds:\n```json\n{j}```\n"
+                msg_content, embeds = Schedule.get_scheduled_msg(msg)
+
+    await interaction.response.send_message(f"### msg {msg_name}\n{msg_embed}\nHere's what it looks like:\n{msg_content}", embeds=embeds, ephemeral=True)
+
+
+@view_msg_cmd.error
+async def view_msg_cmd_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# SET MSG TIME
+###
+
+
+@client.tree.command(
+    name="setmsgtime",
+    description="Sets the time a scheduled message should be shown (in UTC)",
+    guild=discord.Object(id=guild_id)
+)
+@app_commands.describe(msg_name='Name of the scheduled message')
+@app_commands.describe(new_time='Time is in UTC timezone. The format is a 24-hour, 4 digit string ex: 23:30 or 01:45')
+@app_commands.describe(day_of_week='Optional. New day-of-week number. Mon==0, Tue==1, etc')
+@app_commands.checks.has_role(callsign_role_id)
+async def set_msg_time(interaction, msg_name: str, new_time: str, day_of_week: int = -1):
+    sched = Schedule.get_schedule()
+
+    if not sched.set_msg_time(msg_name, new_time, day_of_week):
+        raise ValueError("given time is not valid")
+
+    await interaction.response.send_message(f"### msg {msg_name} time set to {new_time}\n", ephemeral=True)
+
+
+@set_msg_time.error
+async def set_msg_time_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# SET MSG CONTENT
+###
+
+
+@client.tree.command(
+    name="setmsgcontent",
+    description="Sets the message text and embeds of a scheduled message",
+    guild=discord.Object(id=guild_id)
+)
+@app_commands.describe(msg_name='Name of the scheduled message')
+@app_commands.describe(new_text='Required. New text string to display')
+@app_commands.describe(new_embed_json='Optional. JSON data for the embed. Use /viewmsg to copy current embed JSON')
+@app_commands.checks.has_role(callsign_role_id)
+async def set_msg_content(interaction, msg_name: str, new_text: str, new_embed_json: str = ""):
+    sched = Schedule.get_schedule()
+
+    if not sched.set_msg_content(msg_name, new_text, new_embed_json):
+        raise ValueError("Error setting msg content")
+
+    await interaction.response.send_message(f"### msg {msg_name} updated\n", ephemeral=True)
+
+
+@set_msg_content.error
+async def set_msg_content_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+client.run(token, log_handler=handler, log_level=logging.INFO)
