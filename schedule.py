@@ -23,6 +23,11 @@ class Schedule:
         now = datetime.now(timezone.utc)
         weekday = now.date().weekday()
 
+        is_enabled = msg.get('enabled')
+
+        if is_enabled is not None and is_enabled == 0:
+            return False
+
         if weekday == msg['dow']:
             msg_time = msg['time_utc'].split(':')
             if now.hour == int(msg_time[0]) and now.minute == int(msg_time[1]):
@@ -52,6 +57,19 @@ class Schedule:
                 msg['msg'] = [text]
                 if len(embed) > 0:
                     msg['embeds'] = json.loads(embed)
+
+        with sched_lock:
+            with open(file="schedule.json", mode='w', encoding='utf8') as w:
+                json.dump(self.messages, w, indent=4)
+                return True
+        return False
+
+    def set_msg_enabled(self, msg_name: str, value: int) -> bool:
+        for msg in self.messages:
+            if (msg['name'] == msg_name):
+                if (value < 0 or value > 1):
+                    raise ValueError('value must be 0 or 1')
+                msg['enabled'] = value
 
         with sched_lock:
             with open(file="schedule.json", mode='w', encoding='utf8') as w:

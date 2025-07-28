@@ -612,6 +612,7 @@ async def show_msgs_cmd(interaction):
         for x in sched.messages:
             msg += "----------\n"
             msg += f"scheduled msg `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC - with message: `{x['msg']}`\n"
+            msg += f"enabled: {x.get('enabled')} (None values are default enabled)\n"
 
     await interaction.response.send_message(f"### Configured msgs \n{msg}", ephemeral=True)
 
@@ -705,6 +706,33 @@ async def set_msg_content(interaction, msg_name: str, new_text: str, new_embed_j
 
 @set_msg_content.error
 async def set_msg_content_error(interaction: discord.Interaction, error):
+    await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# SET MSG ENABLE FLAG
+###
+
+
+@client.tree.command(
+    name="setmsgenabled",
+    description="Disable or enable a scheduled message.",
+    guild=discord.Object(id=guild_id)
+)
+@app_commands.describe(msg_name='Name of the scheduled message')
+@app_commands.describe(value='0=disabled, 1=enabled')
+@app_commands.checks.has_role(callsign_role_id)
+async def set_msg_enabled(interaction, msg_name: str, value: int):
+    sched = Schedule.get_schedule()
+
+    if not sched.set_msg_enabled(msg_name, value):
+        raise Exception("Error writing to schedule file.")
+
+    await interaction.response.send_message(f"### msg {msg_name} enabled_flag updated\n", ephemeral=True)
+
+
+@set_msg_enabled.error
+async def set_msg_enabled_error(interaction: discord.Interaction, error):
     await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
 
 
