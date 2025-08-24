@@ -146,7 +146,8 @@ async def get_rbn_spots(session, calls: list[str]):
     '''Return RBN spots for each callsign in the given list'''
     x = []
     for call in calls:
-        x.append(query_rbn(session, call))
+        spot = query_rbn(session, call)
+        x.append(spot)
 
     return await asyncio.gather(*x)
 
@@ -178,16 +179,38 @@ async def query_rbn(session, call: str):
     # s = 0 ???
     # r = max rows (100 is highest)
     # cdx = callsign to look for
+    expected_ver = '2aa296'
     call = urllib.parse.quote(call)
-    url = f'https://www.reversebeacon.net/spots.php?h=4f6ae8&ma=60&m=1&bc=1&s=0&r=100&cdx={call}'
+    url = f'https://www.reversebeacon.net/spots.php?h={expected_ver}&ma=60&m=1&bc=1&s=0&r=100&cdx={call}'
 
     async with session.get(url) as response:
         if response.status == 200:
             j = await response.json()
 
+            # log.info(f"rbn response {call} = {json.dumps(j, indent=4)}")
+
+            ver = j.get('ver_h')
+
+            if ver != expected_ver:
+                log.warning(f'RBN API Version mismatch! Expected {expected_ver} but got {ver}')
+                return {
+                    'activator': 'ERROR',
+                    'frequency': 'ERROR',
+                    'mode': 'CW',
+                    'spotTime': datetime.now(),
+                    'comments': '##ERROR##',  # hijack comment field for flag
+                    'reference': '',
+                    'name': 'Error RBN VERSION MISMATCH',
+                    'locationDesc': ''
+                }
+
+            # log.info(f"rbn ver {ver}")
+
             for spot in j.get('spots', []):
                 # Just return first match
                 return convert_rbn_to_pota_spot(j, spot)
+        else:
+            log.error(f"error getting spots from rbn: {response.status}")
 
 
 @AsyncTTL(time_to_live=6 * 60 * 60, skip_args=1)  # 6hours
@@ -323,7 +346,7 @@ def build_rbn_embed(spot: any) -> str:
         return f"{act} —  {freq} ({mode})"
 
     def get_description(call, timestamp):
-        rbn_url = f"https://www.reversebeacon.net/main.php?spotted_call={call}"
+        rbn_url = f"https://www.reversebeacon.net/main.php?spotted_call={call}&rows=100"
         qrz_url = f"https://www.qrz.com/db/{call}"
         return f"{timestamp} • [rbn]({rbn_url}) • [qrz]({qrz_url})\n"
 
@@ -454,11 +477,17 @@ class MgraBot(discord.Client):
             else:
                 spots = await pota_spots
 
+            # log.info(f"all spots {json.dumps(spots, indent=2)}")
+
             for spot in spots:
                 if spot is None:
                     continue
                 act = spot['activator']
                 act = get_basecall(act)
+
+                if spot['comments'] == '##ERROR##':
+                    err_msg = spot['name']
+                    await channel.send(content=f'<@&{ping_role}> {err_msg}')
 
                 if act in calls:
                     must_send = self.storage.check_spot(spot)
