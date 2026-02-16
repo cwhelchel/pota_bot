@@ -142,14 +142,11 @@ async def get_spots(session):
             return []
 
 
-async def get_rbn_spots(session, calls: list[str]):
+async def get_rbn_spots(session, calls: list[str], last_id: int):
     '''Return RBN spots for each callsign in the given list'''
-    x = []
-    for call in calls:
-        spot = query_rbn(session, call)
-        x.append(spot)
+    spots, last_id = await query_rbn(session, calls, last_id)
 
-    return await asyncio.gather(*x)
+    return spots, last_id
 
 
 def convert_rbn_to_pota_spot(j, spot):
@@ -170,18 +167,18 @@ def convert_rbn_to_pota_spot(j, spot):
     }
 
 
-async def query_rbn(session, call: str):
+async def query_rbn(session, calls: list[str], last_id: int):
 
-    # h = returned as "ver_h": "4f6ae8" (version header maybe?)
+    # h = returned as "ver_h": "2aa296" (version header)
     # ma = max age in seconds
     # m = 1 (CW)
     # bc = 1 (CQ)
-    # s = 0 ???
+    # s = last_id
     # r = max rows (100 is highest)
     # cdx = callsign to look for
     expected_ver = '2aa296'
-    call = urllib.parse.quote(call)
-    url = f'https://www.reversebeacon.net/spots.php?h={expected_ver}&ma=60&m=1&bc=1&s=0&r=100&cdx={call}'
+    calls = [urllib.parse.quote(call) for call in calls]
+    url = f'https://www.reversebeacon.net/spots.php?h={expected_ver}&ma=60&m=1&bc=1&s={last_id}&r=100&cdx={",".join(calls)}'
 
     async with session.get(url) as response:
         if response.status == 200:
@@ -193,24 +190,29 @@ async def query_rbn(session, call: str):
 
             if ver != expected_ver:
                 log.warning(f'RBN API Version mismatch! Expected {expected_ver} but got {ver}')
-                return {
+                return [{
                     'activator': 'ERROR',
                     'frequency': 'ERROR',
                     'mode': 'CW',
-                    'spotTime': datetime.now(),
+                    'spotTime': datetime.now(timezone.utc),
                     'comments': '##ERROR##',  # hijack comment field for flag
                     'reference': '',
                     'name': 'Error RBN VERSION MISMATCH',
                     'locationDesc': ''
-                }
+                }], 0
 
             # log.info(f"rbn ver {ver}")
 
-            for spot in j.get('spots', []):
-                # Just return first match
-                return convert_rbn_to_pota_spot(j, spot)
+            spots = {}
+            last_id = max(j.get('lastid_c'), last_id)
+            for spot_id in sorted(j.get('spots', {})):
+                spot = convert_rbn_to_pota_spot(j, spot_id)
+                spots[spot['activator']] = spot
+                last_id = max(int(spot_id), last_id)
+            return list(spots.values()), last_id
         else:
             log.error(f"error getting spots from rbn: {response.status}")
+    return [], 0
 
 
 @AsyncTTL(time_to_live=6 * 60 * 60, skip_args=1)  # 6hours
@@ -452,6 +454,7 @@ class MgraBot(discord.Client):
         super().__init__(*args, **kwargs)
         self.storage = Storage()
         self.tree = app_commands.CommandTree(self)
+        self.last_id = 0
 
     async def setup_hook(self) -> None:
         synced = await self.tree.sync(guild=discord.Object(id=guild_id))
@@ -471,9 +474,10 @@ class MgraBot(discord.Client):
         async with aiohttp.ClientSession() as session:
             pota_spots = get_spots(session)
             if not disable_rbn:
-                rbn_spots = get_rbn_spots(session, calls)
+                rbn_spots = get_rbn_spots(session, calls, self.last_id)
                 both_spots = await asyncio.gather(pota_spots, rbn_spots)
-                spots = both_spots[0] + both_spots[1]
+                spots = both_spots[0] + both_spots[1][0]
+                self.last_id = both_spots[1][1]
             else:
                 spots = await pota_spots
 
