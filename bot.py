@@ -555,8 +555,13 @@ class MgraBot(discord.Client):
 
 mentions = discord.AllowedMentions(roles=True, users=True, everyone=True)
 
+
+bot_intents = discord.Intents.default()
+bot_intents.members = True
+bot_intents.guilds = True
+
 client = MgraBot(
-    intents=discord.Intents.default(),
+    intents=bot_intents,
     allowed_mentions=mentions)
 
 
@@ -767,6 +772,38 @@ async def set_msg_enabled(interaction, msg_name: str, value: int):
 @set_msg_enabled.error
 async def set_msg_enabled_error(interaction: discord.Interaction, error):
     await interaction.response.send_message(f"Error: _{error}_", ephemeral=True)
+
+
+###
+# PINGME command - requires manage_roles permission on bot
+###
+
+
+@client.tree.command(
+    name="pingme",
+    description="Adds or removes the configured ping role for spots.",
+    guild=discord.Object(id=guild_id)
+)
+async def give_role(interaction: discord.Interaction):
+    role = discord.utils.get(interaction.guild.roles, id=ping_role)
+
+    if role is None:
+        await interaction.response.send_message(f"RoleID '{ping_role}' not found. Please check the configuration.", ephemeral=True)
+        return
+
+    try:
+        if role in interaction.user.roles:
+            # user already has the role. remove it
+            await interaction.user.remove_roles(role, reason="Used the /pingme slash command")
+            await interaction.response.send_message("Well fine! Go! See if I care.", ephemeral=True)
+        else:
+            # Add the role to the calling user
+            await interaction.user.add_roles(role, reason="Used the /pingme slash command")
+            await interaction.response.send_message("You have been given the ping role!", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("I do not have the permissions to assign this role. Check my role hierarchy and permissions.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
 
 
 client.run(token, log_handler=handler, log_level=logging.INFO)
