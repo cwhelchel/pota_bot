@@ -55,7 +55,7 @@ pertinent data. And place your schedule.json and callsigns.txt files in the same
 version: "3"
 services:
   myradicalbot:
-    image: krinkl3/spotbot:1.1-amd64
+    image: krinkl3/spotbot:1.12-amd64
     volumes:
       - type: bind
         source: ./callsigns.txt
@@ -71,6 +71,7 @@ services:
       CALLSIGN_MGR_ROLE_ID: "role id here"  # id of role to add/remove callsigns
       PING_ROLE_ID: "role id here"  # id of role to ping in spot embeds
       DISABLE_RBN: '0'
+      RBN_HDR: "6fa56c"
     restart: unless-stopped
 ```
 
@@ -91,6 +92,10 @@ set them in your `docker-compose.yml`):
 * `CALLSIGN_MGR_ROLE_ID` - The role ID for users to add/remove spots to tracking list
 * `PING_ROLE_ID` - The role ID that will be pinged in spots
 * `DISABLE_RBN`: '0' either a '1' or '0'. 1 will turn off querying of RBN spots.
+* `RBN_HDR`: The latest, expected RBN header version as a string ex: '6fa56c' *
+
+\* As of March-2026, this version is **6fa56c**. When the RBN versions changes in the future and 
+if that new version is compatible, you can update this env var and restart container to get RBN spots working.
 
 > The id's should be integer values and are obtained through your discord client
 > except for BOT_TOKEN which is generated via Discord's bot creation webpage. They 

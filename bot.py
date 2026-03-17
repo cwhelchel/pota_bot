@@ -7,6 +7,7 @@ import logging
 import logging.handlers
 import os
 import re
+import sys
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
@@ -30,13 +31,17 @@ callsign_role_id = int(os.environ['CALLSIGN_MGR_ROLE_ID'])
 ping_role = int(os.environ['PING_ROLE_ID'])
 # default disable_rbn to FALSE
 disable_rbn = int(os.environ.get('DISABLE_RBN', '0'))
+rbn_api_hdr = os.environ['RBN_HDR']
 
-handler = logging.handlers.RotatingFileHandler(
-    filename='discord.log',
-    encoding='utf-8',
-    maxBytes=32 * 1024 * 1024,  # 32 MiB
-    backupCount=5,  # Rotate through 5 files
-)
+#handler = logging.handlers.RotatingFileHandler(
+#    filename='discord.log',
+#    encoding='utf-8',
+#    maxBytes=32 * 1024 * 1024,  # 32 MiB
+#    backupCount=5,  # Rotate through 5 files
+#)
+
+# use std out for docker logs
+handler = logging.StreamHandler(sys.stdout)
 
 log = logging.getLogger("discord")
 
@@ -151,7 +156,7 @@ async def get_rbn_spots(session, calls: list[str], last_id: int):
 
 def convert_rbn_to_pota_spot(j, spot):
     arr = j['spots'][spot]
-    t = datetime.fromtimestamp(arr[11], tz=timezone.utc)
+    t = datetime.fromtimestamp(arr[10], tz=timezone.utc)
     timestamp = t.isoformat()
     snr = arr[3]
     wpm = arr[4]
@@ -176,7 +181,10 @@ async def query_rbn(session, calls: list[str], last_id: int):
     # s = last_id
     # r = max rows (100 is highest)
     # cdx = callsign to look for
-    expected_ver = '2aa296'
+
+    # get expected hdr from ENV var
+    expected_ver = rbn_api_hdr  # '2aa296'
+
     calls = [urllib.parse.quote(call) for call in calls]
     url = f'https://www.reversebeacon.net/spots.php?h={expected_ver}&ma=60&m=1&bc=1&s={last_id}&r=100&cdx={",".join(calls)}'
 
