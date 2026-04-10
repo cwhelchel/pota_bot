@@ -4,11 +4,9 @@ import asyncio
 import calendar
 import json
 import logging
-import logging.handlers
 import os
 import re
 import sys
-import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 import aiohttp
@@ -16,6 +14,9 @@ import discord
 from cache import AsyncTTL
 from discord.ext import tasks
 from discord import app_commands
+
+from rerbn import add_call_to_callgroup, query_rerbn, remove_call_from_callgroup
+from rbn import query_rbn
 
 from schedule import Schedule
 
@@ -31,19 +32,25 @@ callsign_role_id = int(os.environ['CALLSIGN_MGR_ROLE_ID'])
 ping_role = int(os.environ['PING_ROLE_ID'])
 # default disable_rbn to FALSE
 disable_rbn = int(os.environ.get('DISABLE_RBN', '0'))
-rbn_api_hdr = os.environ['RBN_HDR']
 
-#handler = logging.handlers.RotatingFileHandler(
+rerbn_callgroup = os.environ.get('RERBN_CALLGROUP', None)
+
+# handler = logging.handlers.RotatingFileHandler(
 #    filename='discord.log',
 #    encoding='utf-8',
 #    maxBytes=32 * 1024 * 1024,  # 32 MiB
 #    backupCount=5,  # Rotate through 5 files
-#)
+# )
 
 # use std out for docker logs
 handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(asctime)s [%(levelname)s][%(name)s] -- %(message)s')
+
+handler.setFormatter(formatter)
 
 log = logging.getLogger("discord")
+log.addHandler(handler)
+
 
 test_msg = {
     "content": "",
@@ -147,80 +154,23 @@ async def get_spots(session):
             return []
 
 
-async def get_rbn_spots(session, calls: list[str], last_id: int):
+async def get_rbn_spots(
+        session: aiohttp.ClientSession,
+        calls: list[str],
+        last_id: int):
     '''Return RBN spots for each callsign in the given list'''
-    spots, last_id = await query_rbn(session, calls, last_id)
+
+    if rerbn_callgroup is None:
+        # query via reversebeacon.net 'api'
+        spots, last_id = await query_rbn(session, calls, last_id)
+    else:
+        # query by rerbn callsign groups api https://vailrerbn.com/groups
+        # this requires the group to be created outside of bot and configured
+        # in env vars
+        spots = await query_rerbn(session)
+        last_id = 0
 
     return spots, last_id
-
-
-def convert_rbn_to_pota_spot(j, spot):
-    arr = j['spots'][spot]
-    t = datetime.fromtimestamp(arr[10], tz=timezone.utc)
-    timestamp = t.isoformat()
-    snr = arr[3]
-    wpm = arr[4]
-    return {
-        'activator': arr[2],
-        'frequency': arr[1],
-        'mode': 'CW',         # URL only gets CW spots
-        'spotTime': timestamp,
-        'comments': '##RBN##',  # hijack comment field for flag
-        'reference': f'de {arr[0]}',
-        'name': f'{snr} db • {wpm} wpm',
-        'locationDesc': ''
-    }
-
-
-async def query_rbn(session, calls: list[str], last_id: int):
-
-    # h = returned as "ver_h": "2aa296" (version header)
-    # ma = max age in seconds
-    # m = 1 (CW)
-    # bc = 1 (CQ)
-    # s = last_id
-    # r = max rows (100 is highest)
-    # cdx = callsign to look for
-
-    # get expected hdr from ENV var
-    expected_ver = rbn_api_hdr  # '2aa296'
-
-    calls = [urllib.parse.quote(call) for call in calls]
-    url = f'https://www.reversebeacon.net/spots.php?h={expected_ver}&ma=60&m=1&bc=1&s={last_id}&r=100&cdx={",".join(calls)}'
-
-    async with session.get(url) as response:
-        if response.status == 200:
-            j = await response.json()
-
-            # log.info(f"rbn response {call} = {json.dumps(j, indent=4)}")
-
-            ver = j.get('ver_h')
-
-            if ver != expected_ver:
-                log.warning(f'RBN API Version mismatch! Expected {expected_ver} but got {ver}')
-                return [{
-                    'activator': 'ERROR',
-                    'frequency': 'ERROR',
-                    'mode': 'CW',
-                    'spotTime': datetime.now(timezone.utc),
-                    'comments': '##ERROR##',  # hijack comment field for flag
-                    'reference': '',
-                    'name': 'Error RBN VERSION MISMATCH',
-                    'locationDesc': ''
-                }], 0
-
-            # log.info(f"rbn ver {ver}")
-
-            spots = {}
-            last_id = max(j.get('lastid_c'), last_id)
-            for spot_id in sorted(j.get('spots', {})):
-                spot = convert_rbn_to_pota_spot(j, spot_id)
-                spots[spot['activator']] = spot
-                last_id = max(int(spot_id), last_id)
-            return list(spots.values()), last_id
-        else:
-            log.error(f"error getting spots from rbn: {response.status}")
-    return [], 0
 
 
 @AsyncTTL(time_to_live=6 * 60 * 60, skip_args=1)  # 6hours
@@ -609,6 +559,11 @@ async def show_call_cmd_error(interaction: discord.Interaction, error):
 async def add_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"adding callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
     await add_callsign(callsign.upper())
+    async with aiohttp.ClientSession() as session:
+        res, err = await add_call_to_callgroup(session, callsign.upper())
+        if (not res):
+            raise Exception(f"Error adding call to ReRBN callgroup: {err}")
+
     await interaction.response.send_message(f"### Callsign added\n {callsign}", ephemeral=True)
 
 
@@ -632,6 +587,10 @@ async def add_call_cmd_error(interaction: discord.Interaction, error):
 async def remove_call_cmd(interaction: discord.Interaction, callsign: str):
     log.info(f"removing callsign {callsign}. user: {interaction.user} - {interaction.user.id}")
     await remove_callsign(callsign.upper())
+    async with aiohttp.ClientSession() as session:
+        res, err = await remove_call_from_callgroup(session, callsign.upper())
+        if (not res):
+            raise Exception(f"Error removing call from ReRBN callgroup: {err}")
     await interaction.response.send_message(f"### Callsign removed\n {callsign}", ephemeral=True)
 
 
@@ -814,4 +773,4 @@ async def give_role(interaction: discord.Interaction):
         await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
 
 
-client.run(token, log_handler=handler, log_level=logging.INFO)
+client.run(token, log_handler=handler, log_level=logging.INFO, log_formatter=formatter)

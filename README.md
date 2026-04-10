@@ -92,15 +92,27 @@ set them in your `docker-compose.yml`):
 * `CALLSIGN_MGR_ROLE_ID` - The role ID for users to add/remove spots to tracking list
 * `PING_ROLE_ID` - The role ID that will be pinged in spots
 * `DISABLE_RBN`: '0' either a '1' or '0'. 1 will turn off querying of RBN spots.
-* `RBN_HDR`: The latest, expected RBN header version as a string ex: '6fa56c' *
+* `RERBN_CALLGROUP` - for vail ReRBN. see below.
+* `RERBN_CALLGROUP_EDITKEY` - for vail ReRBN. see below.
 
-\* As of March-2026, this version is **6fa56c**. When the RBN versions changes in the future and 
-if that new version is compatible, you can update this env var and restart container to get RBN spots working.
+\* Apr-2026 - `RBN_HDR` env var should be removed completely. the bot now pulls latest header from reversebeacon.net. REMOVE COMPLETELY.
 
 > The id's should be integer values and are obtained through your discord client
 > except for BOT_TOKEN which is generated via Discord's bot creation webpage. They 
 > are still enclosed in quotes in the docker compose file.
 
+### Vail ReRBN
+
+The bot can now use Vail ReRBN Callsign groups. [See here](https://vailrerbn.com/groups). 
+A group is similar to the callsigns.txt file in the bot. There is a helper script
+that can use your existing callsigns.txt file to create a callsign group in the ReRBN API.
+
+Once the group is created, the name and edit key can be configured as the env vars 
+listed above. If the env vars are present in the environment (even if they are emtpy),
+then the regular reversebeacon API is not used and ReRBN API is used instead. 
+
+The `addcall` and `removecall` commands work with the ReRBN API as well. Allowing you 
+to modify your callgroup as well as the callsigns.txt file.
 
 ### Building a local docker image
 You can always build the docker images from source. Build the image like so:
