@@ -615,9 +615,13 @@ async def show_msgs_cmd(interaction):
     msg = ""
     if sched:
         for x in sched.messages:
-            msg += "----------\n"
-            msg += f"scheduled msg `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC - with message: `{x['msg']}`\n"
-            msg += f"enabled: {x.get('enabled')} (None values are default enabled)\n"
+            dt = sched.get_msg_send_time(x)
+            lc = dt.astimezone().strftime("%Y-%m-%d %I:%M %p")
+            msg += "────── MESSAGE ──────\n"
+            msg += f"> *msg* `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC\n"
+            msg += f"> *msg text*: `{x['msg']}`\n"
+            msg += f"> *enabled*: {x.get('enabled')} (None == enabled)\n"
+            msg += f"> *next message time*: {dt}  -- local: {lc}\n"
 
     await interaction.response.send_message(f"### Configured msgs \n{msg}", ephemeral=True)
 

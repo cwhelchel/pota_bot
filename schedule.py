@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, time
 import json
 import logging
 import re
@@ -34,6 +34,30 @@ class Schedule:
                 return True
 
         return False
+
+    def get_msg_send_time(self, msg) -> datetime:
+        '''
+        Gets the date and time the next message of type msg will be sent by bot
+
+        :param msg str: the message json
+        :return: timestamp to send msg in UTC
+        :rtype: datetime
+        '''
+        current_date = datetime.now().date()
+
+        utc = msg.get('time_utc')
+        msg_time = utc.split(':')
+        hour = int(msg_time[0])
+        minute = int(msg_time[1])
+
+        dow = msg.get('dow')
+        days_ahead = (dow - current_date.weekday()) % 7
+        target_date = current_date + timedelta(days=days_ahead)
+        target_time = time(hour=hour, minute=minute)
+
+        x = datetime.combine(target_date, target_time, tzinfo=timezone.utc)
+
+        return x
 
     def set_msg_time(self, msg_name, time, dow: int = -1) -> bool:
         pattern = r'^([01][0-9]|2[0-3]):([0-5][0-9])$'

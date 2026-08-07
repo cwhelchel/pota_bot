@@ -87,7 +87,7 @@ async def query_rbn(
                 last_id = max(int(spot_id), last_id)
             return list(spots.values()), last_id
         else:
-            log.error(f"error getting spots from rbn: {response.status}")
+            log.error(f"error getting spots from rbn: {response.status} {response.text}")
     return [], 0
 
 
