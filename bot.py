@@ -625,7 +625,7 @@ async def show_msgs_cmd(interaction: discord.Interaction):
             if enabled is None:
                 enabled = 1
 
-            msg += "────── MESSAGE ──────\n"
+            msg += "\n────── MESSAGE ──────\n"
             msg += f"> *msg* `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC\n"
             msg += f"> *msg text*: `{x['msg']}`\n"
             msg += f"> *enabled*: **{'On' if enabled else 'Disabled'}**\n"
