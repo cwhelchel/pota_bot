@@ -620,10 +620,15 @@ async def show_msgs_cmd(interaction: discord.Interaction):
             msg = ""
             dt = sched.get_msg_send_time(x)
             lc = dt.astimezone().strftime("%Y-%m-%d %I:%M %p")
+            enabled = x.get('enabled')
+
+            if enabled is None:
+                enabled = 1
+
             msg += "────── MESSAGE ──────\n"
             msg += f"> *msg* `{x['name']}` on {calendar.day_abbr[x['dow']]} at {x['time_utc']} UTC\n"
             msg += f"> *msg text*: `{x['msg']}`\n"
-            msg += f"> *enabled*: {x.get('enabled')} (None == enabled)\n"
+            msg += f"> *enabled*: **{'On' if enabled else 'Disabled'}**\n"
             msg += f"> *next message time*: {dt}  -- local: {lc}\n"
             size += len(msg)
 
