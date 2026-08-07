@@ -609,12 +609,15 @@ async def remove_call_cmd_error(interaction: discord.Interaction, error):
     description="Show a list scheduled messages",
     guild=discord.Object(id=guild_id)
 )
-async def show_msgs_cmd(interaction):
+async def show_msgs_cmd(interaction: discord.Interaction):
     sched = Schedule.get_schedule()
 
-    msg = ""
+    size = 0
+    msgs = []
+    limit = 1950
     if sched:
         for x in sched.messages:
+            msg = ""
             dt = sched.get_msg_send_time(x)
             lc = dt.astimezone().strftime("%Y-%m-%d %I:%M %p")
             msg += "────── MESSAGE ──────\n"
@@ -622,8 +625,36 @@ async def show_msgs_cmd(interaction):
             msg += f"> *msg text*: `{x['msg']}`\n"
             msg += f"> *enabled*: {x.get('enabled')} (None == enabled)\n"
             msg += f"> *next message time*: {dt}  -- local: {lc}\n"
+            size += len(msg)
 
-    await interaction.response.send_message(f"### Configured msgs \n{msg}", ephemeral=True)
+            if (size > limit):
+                # adds a 'flag' to list so it can split into chunks below
+                msgs.append(None)
+                size = 0
+
+            msgs.append(msg)
+
+    # loop thru msgs and accumulate each text into a chunk that'll fit in
+    # discords size limit (2000 chars)
+    chunks = []
+    acc = ""
+    for m in msgs:
+        if m is not None:
+            acc += m
+        else:
+            chunks.append(acc)
+            acc = ""
+
+    # pickup last chunk
+    chunks.append(acc)
+
+    # log.info(chunks)
+
+    # can only 'respond' to interaction once. all other msgs must be followups
+    await interaction.response.send_message(chunks[0], ephemeral=True)
+
+    for chunk in chunks[1:]:
+        await interaction.followup.send(chunk, ephemeral=True)
 
 
 @show_msgs_cmd.error
