@@ -186,6 +186,13 @@ async def get_activator_stats(session, activator: str):
             return None
 
 
+def get_park_list() -> list[str]:
+    with open(file="parks.txt", mode="r") as f:
+        lines = f.readlines()
+
+    return [s.strip() for s in lines]
+
+
 async def get_callsign_list() -> list[str]:
     async with mutex_lock:
         return _get_callsign_list()
@@ -428,6 +435,7 @@ class MgraBot(discord.Client):
     async def my_background_task(self):
         channel = self.get_channel(channel_id)
         calls = await get_callsign_list()
+        parks = get_park_list()
 
         async with aiohttp.ClientSession() as session:
             pota_spots = get_spots(session)
@@ -447,11 +455,13 @@ class MgraBot(discord.Client):
                 act = spot['activator']
                 act = get_basecall(act)
 
+                park_ref = spot['reference']
+
                 if spot['comments'] == '##ERROR##':
                     err_msg = spot['name']
                     await channel.send(content=f'<@&{ping_role}> {err_msg}')
 
-                if act in calls:
+                if (act in calls) or (park_ref in parks):
                     must_send = self.storage.check_spot(spot)
 
                     if must_send:
